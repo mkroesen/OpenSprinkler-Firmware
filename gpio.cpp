@@ -206,6 +206,7 @@ unsigned char digitalReadExt(unsigned char pin) {
 const char *gpio_consumer = "opensprinkler";
 
 struct gpiod_chip *chip = NULL;
+#if WITH_LIBGPIO_VERSION < 0x00020000
 struct gpiod_line* gpio_lines[] = {
 	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -214,6 +215,9 @@ struct gpiod_line* gpio_lines[] = {
 	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 	NULL, NULL, NULL, NULL, NULL,
 };
+#else
+struct gpiod_line_request *gpio_line_requests[GPIO_MAX] = {0};
+#endif
 
 int assert_gpiod_chip() {
 	if( !chip ) {
@@ -238,6 +242,7 @@ int assert_gpiod_chip() {
 			break;
 		}
 
+#if WITH_LIBGPIO_VERSION < 0x00020000
 		if (chip_name) {
 			gpiod_chip_iter *iter = gpiod_chip_iter_new();
 			gpiod_chip *tmp_chip = NULL;
@@ -258,13 +263,20 @@ int assert_gpiod_chip() {
 				return 0;
 			}
 		}
-
+#else
+		chip = gpiod_chip_open("/dev/gpiochip0");
+		if (chip) {
+			DEBUG_PRINTLN("opened /dev/gpiochip0");
+			return 0;
+		}
+#endif
 		DEBUG_PRINTLN("failed to find and open gpio chip");
 		return -1;
 	}
 	return 0;
 }
 
+#if WITH_LIBGPIO_VERSION < 0x00020000
 int assert_gpiod_line(int pin) {
 	if( !gpio_lines[pin] ) {
 		if( assert_gpiod_chip() ) { return -1; }
@@ -281,8 +293,10 @@ int assert_gpiod_line(int pin) {
 	}
 	return 0;
 }
+#endif
 
 /** Set pin mode, in or out */
+#if WITH_LIBGPIO_VERSION < 0x00020000
 void pinMode(int pin, unsigned char mode) {
 	if( assert_gpiod_line(pin) ) { return; }
 	switch(mode) {
@@ -302,15 +316,87 @@ void pinMode(int pin, unsigned char mode) {
 
 	return;
 }
+#else
+/** Set pin mode, in or out */
+void pinMode(int pin, unsigned char mode) {
+	if (pin >= GPIO_MAX) {
+		DEBUG_PRINTLN("pin out of range");
+		return;
+	}
+
+	if (assert_gpiod_chip()) {
+		return;
+	}
+
+	// Release any previous request for this pin
+	if (gpio_line_requests[pin]) {
+		gpiod_line_request_release(gpio_line_requests[pin]);
+		gpio_line_requests[pin] = NULL;
+	}
+	
+	// Create a new request and configuration
+	struct gpiod_line_request *request = NULL;
+	struct gpiod_line_config *config = gpiod_line_config_new();
+	gpiod_line_config_add_line_settings(config, (unsigned int *) &pin, 1, gpiod_line_settings_new());
+	
+	// Set the correct flags based on the mode
+	int request_flags = 0;
+	int initial_value = 0;
+	
+	switch (mode) {
+		case INPUT:
+			gpiod_line_settings_set_direction(gpiod_line_config_get_line_settings(config, pin), GPIOD_LINE_DIRECTION_INPUT);
+			break;
+		case INPUT_PULLUP:
+			gpiod_line_settings_set_direction(gpiod_line_config_get_line_settings(config, pin), GPIOD_LINE_DIRECTION_INPUT);
+			gpiod_line_settings_set_bias(gpiod_line_config_get_line_settings(config, pin), GPIOD_LINE_BIAS_PULL_UP);
+			break;
+		case OUTPUT:
+			gpiod_line_settings_set_direction(gpiod_line_config_get_line_settings(config, pin), GPIOD_LINE_DIRECTION_OUTPUT);
+			break;
+		default:
+			DEBUG_PRINTLN("invalid pin direction");
+			gpiod_line_config_free(config);
+			return;
+	}
+
+	// Request the line with the configured settings
+	request = gpiod_chip_request_lines(chip, NULL, config);
+	
+	// Clean up config object
+	gpiod_line_config_free(config);
+
+	if (!request) {
+		DEBUG_PRINT("failed to request gpio line ");
+		DEBUG_PRINTLN(pin);
+	} else {
+		gpio_line_requests[pin] = request;
+		DEBUG_PRINT("opened gpio line ");
+		DEBUG_PRINTLN(pin);
+	}
+
+	return;
+}
+#endif
 
 /** Read digital value */
 unsigned char digitalRead(int pin) {
+#if WITH_LIBGPIO_VERSION < 0x00020000
 	if( !gpio_lines[pin] ) {
 		DEBUG_PRINT("tried to read uninitialized pin ");
 		DEBUG_PRINTLN(pin);
 		return 0;
 	}
 	int val = gpiod_line_get_value(gpio_lines[pin]);
+#else
+	if (pin >= GPIO_MAX || !gpio_line_requests[pin]) {
+		DEBUG_PRINT("tried to read uninitialized pin ");
+		DEBUG_PRINTLN(pin);
+		return 0;
+	}
+
+	int val = gpiod_line_request_get_value(gpio_line_requests[pin], 0);
+#endif
 	if( val < 0 ) {
 		DEBUG_PRINT("failed to read value on pin ");
 		DEBUG_PRINTLN(pin);
@@ -321,6 +407,7 @@ unsigned char digitalRead(int pin) {
 
 /** Write digital value */
 void digitalWrite(int pin, unsigned char value) {
+#if WITH_LIBGPIO_VERSION < 0x00020000
 	if( !gpio_lines[pin] ) {
 		DEBUG_PRINT("tried to write uninitialized pin ");
 		DEBUG_PRINTLN(pin);
@@ -329,6 +416,17 @@ void digitalWrite(int pin, unsigned char value) {
 
 	int res;
 	res = gpiod_line_set_value(gpio_lines[pin], value);
+#else
+	if (pin >= GPIO_MAX || !gpio_line_requests[pin]) {
+		DEBUG_PRINT("tried to write uninitialized pin ");
+		DEBUG_PRINTLN(pin);
+		return;
+	}
+
+        enum gpiod_line_value line_value = GPIOD_LINE_VALUE_INACTIVE;
+        if (value == HIGH) line_value = GPIOD_LINE_VALUE_ACTIVE;
+	int res = gpiod_line_request_set_value(gpio_line_requests[pin], 0, line_value);
+#endif
 	if( res ) {
 		DEBUG_PRINT("failed to write value on pin ");
 		DEBUG_PRINTLN(pin);
