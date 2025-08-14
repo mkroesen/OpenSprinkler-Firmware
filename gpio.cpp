@@ -196,6 +196,13 @@ unsigned char digitalReadExt(unsigned char pin) {
 #include <poll.h>
 #include <pthread.h>
 #include <gpiod.h>
+/*
+ * Use GPIOD_LINE_BULK_MAX_LINES in order to determine,
+ * whether this is compiled using libgpio v1 or v2.
+ */
+#ifdef GPIOD_LINE_BULK_MAX_LINES
+#define USE_GPIOD_API_V1
+#endif
 
 #include "utils.h"
 
@@ -206,7 +213,7 @@ unsigned char digitalReadExt(unsigned char pin) {
 const char *gpio_consumer = "opensprinkler";
 
 struct gpiod_chip *chip = NULL;
-#if WITH_LIBGPIO_VERSION < 0x00020000
+#ifdef USE_GPIOD_API_V1
 struct gpiod_line* gpio_lines[] = {
 	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -242,7 +249,7 @@ int assert_gpiod_chip() {
 			break;
 		}
 
-#if WITH_LIBGPIO_VERSION < 0x00020000
+#ifdef USE_GPIOD_API_V1
 		if (chip_name) {
 			gpiod_chip_iter *iter = gpiod_chip_iter_new();
 			gpiod_chip *tmp_chip = NULL;
@@ -276,7 +283,7 @@ int assert_gpiod_chip() {
 	return 0;
 }
 
-#if WITH_LIBGPIO_VERSION < 0x00020000
+#ifdef USE_GPIOD_API_V1
 int assert_gpiod_line(int pin) {
 	if( !gpio_lines[pin] ) {
 		if( assert_gpiod_chip() ) { return -1; }
@@ -296,7 +303,7 @@ int assert_gpiod_line(int pin) {
 #endif
 
 /** Set pin mode, in or out */
-#if WITH_LIBGPIO_VERSION < 0x00020000
+#ifdef USE_GPIOD_API_V1
 void pinMode(int pin, unsigned char mode) {
 	if( assert_gpiod_line(pin) ) { return; }
 	switch(mode) {
@@ -381,7 +388,7 @@ void pinMode(int pin, unsigned char mode) {
 
 /** Read digital value */
 unsigned char digitalRead(int pin) {
-#if WITH_LIBGPIO_VERSION < 0x00020000
+#ifdef USE_GPIOD_API_V1
 	if( !gpio_lines[pin] ) {
 		DEBUG_PRINT("tried to read uninitialized pin ");
 		DEBUG_PRINTLN(pin);
@@ -407,7 +414,7 @@ unsigned char digitalRead(int pin) {
 
 /** Write digital value */
 void digitalWrite(int pin, unsigned char value) {
-#if WITH_LIBGPIO_VERSION < 0x00020000
+#ifdef USE_GPIOD_API_V1
 	if( !gpio_lines[pin] ) {
 		DEBUG_PRINT("tried to write uninitialized pin ");
 		DEBUG_PRINTLN(pin);
