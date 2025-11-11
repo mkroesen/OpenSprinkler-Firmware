@@ -344,6 +344,7 @@ void pinMode(int pin, unsigned char mode) {
 	// Create a new request and configuration
 	struct gpiod_line_request *request = NULL;
 	struct gpiod_line_config *config = gpiod_line_config_new();
+	struct gpiod_request_config *reqconf = gpiod_request_config_new();
 	gpiod_line_config_add_line_settings(config, (unsigned int *) &pin, 1, gpiod_line_settings_new());
 	
 	// Set the correct flags based on the mode
@@ -367,8 +368,11 @@ void pinMode(int pin, unsigned char mode) {
 			return;
 	}
 
+	// Set the gpio consumer
+	gpiod_request_config_set_consumer(reqconf, gpio_consumer);
+
 	// Request the line with the configured settings
-	request = gpiod_chip_request_lines(chip, NULL, config);
+	request = gpiod_chip_request_lines(chip, reqconf, config);
 	
 	// Clean up config object
 	gpiod_line_config_free(config);
@@ -432,7 +436,7 @@ void digitalWrite(int pin, unsigned char value) {
 
         enum gpiod_line_value line_value = GPIOD_LINE_VALUE_INACTIVE;
         if (value == HIGH) line_value = GPIOD_LINE_VALUE_ACTIVE;
-	int res = gpiod_line_request_set_value(gpio_line_requests[pin], 0, line_value);
+	int res = gpiod_line_request_set_value(gpio_line_requests[pin], pin, line_value);
 #endif
 	if( res ) {
 		DEBUG_PRINT("failed to write value on pin ");
